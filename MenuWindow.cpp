@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <windowsx.h>      // ← GET_X_LPARAM / GET_Y_LPARAM
 #include <memory>          // ← std::unique_ptr / make_unique
+#include <utility>
 #include "MenuWindow.h"
 #include "FileLoader.h"     // selectTxtFile / loadTextFileW
 #include "Resource.h"       // ID кнопок
@@ -106,6 +107,8 @@ void MenuWindow::paintMenu(HDC hdc)
 // ───────────────────────────────────────────────────────────
 MenuWindow::MenuWindow(HINSTANCE hInst) : _hInst(hInst)
 {
+    _imgCache = std::make_shared<ImageCache>();
+
     // 1) регистрируем класс окна
     WNDCLASSEX wc{ sizeof(wc) };
     wc.hInstance = _hInst;
@@ -146,25 +149,47 @@ MenuWindow::~MenuWindow()
 namespace
 {
     constexpr UINT WM_SET_BG = WM_USER + 1;    // передаём HBITMAP в ReaderPanel
+    constexpr UINT WM_SCENE_ERROR = WM_USER + 2; // передаём ошибку генерации
     constexpr UINT IDT_SPINNER = 2;            // таймер для крутилки
+
+    void dispatchSceneToUi(const std::shared_ptr<ImageCache>& cache, HWND hwnd, const std::wstring& requestKey, SceneApiResponse&& scene)
+    {
+        if (!cache)
+            return;
+
+        scene.requestId = requestKey;
+
+        if (!scene.imageUrl.empty())
+        {
+            if (HBITMAP bmp = cache->Get(scene.imageUrl))
+            {
+                PostMessage(hwnd, WM_SET_BG, reinterpret_cast<WPARAM>(bmp), 0);
+            }
+            return;
+        }
+
+        if (!scene.errorMessage.empty())
+        {
+            auto payload = new SceneApiResponse(std::move(scene));
+            if (!PostMessage(hwnd, WM_SCENE_ERROR, reinterpret_cast<WPARAM>(payload), 0))
+                delete payload;
+        }
+    }
 
     //-----------------------------------------------------------------------
     // утилита: отправить сцену на асинхр. загрузку (если ещё не запрошена)
     //-----------------------------------------------------------------------
     void enqueueScene(ReaderPanel* reader,
-        ImageCache& cache,
+        const std::shared_ptr<ImageCache>& cache,
         HWND hwnd,
         const std::wstring& chunk)
     {
         if (!reader || !reader->TryMarkFrameRequested(chunk))   // уже была
             return;
 
-        fetchSceneAsync(chunk, [reader, &cache, hwnd](SceneApiResponse r)
+        fetchSceneAsync(chunk, [cache, hwnd, chunk](SceneApiResponse r)
             {
-                if (r.imageUrl.empty())
-                    return;
-                if (HBITMAP bmp = cache.Get(r.imageUrl))
-                    PostMessage(hwnd, WM_SET_BG, reinterpret_cast<WPARAM>(bmp), 0);
+                dispatchSceneToUi(cache, hwnd, chunk, std::move(r));
             });
     }
 }
@@ -209,13 +234,11 @@ void MenuWindow::OnCommand(UINT id)
             {
                 if (_reader->TryMarkFrameRequested(frame))
                 {
-                    fetchSceneAsync(frame, [this](SceneApiResponse scene)
+                    auto cache = _imgCache;
+                    HWND hwnd = _hWnd;
+                    fetchSceneAsync(frame, [cache, hwnd, frame](SceneApiResponse scene)
                         {
-                            if (!scene.imageUrl.empty())
-                            {
-                                if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                    PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                            }
+                            dispatchSceneToUi(cache, hwnd, frame, std::move(scene));
                         });
                 }
             });
@@ -232,13 +255,11 @@ void MenuWindow::OnCommand(UINT id)
             {
                 if (_reader->TryMarkFrameRequested(chunk))
                 {
-                    fetchSceneAsync(chunk, [this](SceneApiResponse scene)
+                    auto cache = _imgCache;
+                    HWND hwnd = _hWnd;
+                    fetchSceneAsync(chunk, [cache, hwnd, chunk](SceneApiResponse scene)
                         {
-                            if (!scene.imageUrl.empty())
-                            {
-                                if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                    PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                            }
+                            dispatchSceneToUi(cache, hwnd, chunk, std::move(scene));
                         });
                 }
             };
@@ -247,10 +268,15 @@ void MenuWindow::OnCommand(UINT id)
         if (_reader->TryMarkFrameRequested(scene1))
         {
             SceneApiResponse first = fetchScene(scene1);
-            if (!first.imageUrl.empty())
+            first.requestId = scene1;
+            if (!first.imageUrl.empty() && _imgCache)
             {
-                if (HBITMAP bmp = _imgCache.Get(first.imageUrl))
+                if (HBITMAP bmp = _imgCache->Get(first.imageUrl))
                     _reader->SetBackground(bmp);
+            }
+            else if (!first.errorMessage.empty())
+            {
+                _reader->SetSceneError(first);
             }
         }
 
@@ -382,6 +408,23 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
 
             InvalidateRect(self->_hWnd, nullptr, FALSE);
         }
+        return 0;
+    }
+
+    case WM_SCENE_ERROR:
+    {
+        auto payload = reinterpret_cast<SceneApiResponse*>(wParam);
+        if (payload && self->_reader)
+        {
+            self->_reader->SetSceneError(*payload);
+        }
+
+        delete payload;
+
+        self->_forceSpinner = false;
+        self->_showSpinner = false;
+        KillTimer(self->_hWnd, IDT_SPINNER);
+        InvalidateRect(self->_hWnd, nullptr, FALSE);
         return 0;
     }
 

@@ -3,6 +3,8 @@
 #include <string>
 #include <functional>
 #include <unordered_set>
+#include "ImageCache.h"
+#include "SceneFetcher.h"
 
 // ────────────────────────────────────────────────────────────────
 //  Вертикальная читалка с собственным скроллбаром и «эффектом
@@ -30,6 +32,7 @@ public:
     void updateScrollInfo();
     std::wstring GetFirstFrame() const;
     void SetBackground(HBITMAP bmp);
+    void SetSceneError(const SceneApiResponse& scene);
     void SetOnFrameChange(std::function<void(const std::wstring&)> cb);
 
     std::wstring GetFrameText(size_t start, int count) const;
@@ -74,6 +77,8 @@ private:
     static constexpr COLORREF CLR_BOX = RGB(55, 55, 55);
     static constexpr COLORREF CLR_TEXT = RGB(245, 245, 245);
     static constexpr COLORREF CLR_CLOSE = RGB(55, 55, 55);
+    static constexpr COLORREF CLR_SCENE_BG = RGB(24, 24, 26);
+    static constexpr COLORREF CLR_SCENE_ERR = RGB(255, 120, 120);
     static constexpr int BOX_W = 1000;
     static constexpr int BOX_H = 260;
     static constexpr int BOX_R = 12;
@@ -91,4 +96,8 @@ private:
     std::unordered_set<std::wstring> _requestedFrames;
 
     HBITMAP _bgBitmap = nullptr;
+    ImageCache _imageCache;
+    std::wstring _sceneStatusText;
+    DWORD _sceneStatusCode = 0;
+    DWORD _sceneWin32Error = 0;
 };

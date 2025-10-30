@@ -20,7 +20,7 @@ private:
     bool _showSpinner = false;
     int  _spinnerAngle = 0;
     // Internal helpers
-    ImageCache _imgCache;
+    std::shared_ptr<ImageCache> _imgCache;
     void RegisterClass();
     void CreateMainWindow(int nCmdShow);
 

@@ -5,6 +5,7 @@
 #include <urlmon.h>
 #include <gdiplus.h>
 #include <shlwapi.h>
+#include <mutex>
 
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "gdiplus.lib")
@@ -15,27 +16,48 @@ using namespace Gdiplus;
 bool       ImageCache::_gdiplusStarted = false;
 ULONG_PTR  ImageCache::_gdiplusToken = 0;
 
+namespace {
+    std::once_flag gdiInitFlag;
+}
+
 void ImageCache::ensureGdiplus()
 {
-    if (!_gdiplusStarted)
+    std::call_once(gdiInitFlag, []()
     {
         GdiplusStartupInput gdiSI;
         GdiplusStartup(&_gdiplusToken, &gdiSI, nullptr);
         _gdiplusStarted = true;
-    }
+    });
 }
 
 HBITMAP ImageCache::Get(const std::wstring& url)
 {
-    auto it = _cache.find(url);
-    if (it != _cache.end()) return it->second;
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto it = _cache.find(url);
+        if (it != _cache.end())
+            return it->second;
+    }
 
     std::wstring tmpFile = downloadToTemp(url);
-    if (tmpFile.empty()) return nullptr;
+    if (tmpFile.empty())
+        return nullptr;
 
     ensureGdiplus();
     HBITMAP bmp = loadBitmapFromFile(tmpFile);
-    if (bmp) _cache[url] = bmp;
+    if (!bmp)
+        return nullptr;
+
+    {
+        std::lock_guard<std::mutex> lock(_mutex);
+        auto [it, inserted] = _cache.emplace(url, bmp);
+        if (!inserted)
+        {
+            DeleteObject(bmp);
+            return it->second;
+        }
+    }
+
     return bmp;
 }
 
@@ -52,9 +74,15 @@ std::wstring ImageCache::downloadToTemp(const std::wstring& url)
     GetTempPathW(MAX_PATH, tmpDir);
     GetTempFileNameW(tmpDir, L"msc", 0, tmpName);
 
-    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return L"";
+    HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(init) && init != RPC_E_CHANGED_MODE)
+        return L"";
+
+    const bool needUninit = SUCCEEDED(init);
     HRESULT hr = URLDownloadToFileW(nullptr, url.c_str(), tmpName, 0, nullptr);
-    CoUninitialize();
+    if (needUninit)
+        CoUninitialize();
+
     return SUCCEEDED(hr) ? std::wstring(tmpName) : L"";
 }
 

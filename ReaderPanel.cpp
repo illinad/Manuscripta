@@ -2,6 +2,7 @@
 #include <algorithm>
 #include "config.h"
 #include <unordered_set>
+#include <utility>
 #include "SceneFetcher.h"
 #include "ImageCache.h"
 
@@ -174,6 +175,11 @@ void ReaderPanel::SetText(const std::wstring& txt)
     _frameStart = 0;
     _cursorPos = 0;
     _frameIdle = false;      // ← лишнее обнуление _visible убрано
+    _requestedFrames.clear();
+    _bgBitmap = nullptr;
+    _sceneStatusText.clear();
+    _sceneStatusCode = 0;
+    _sceneWin32Error = 0;
 
 
     RECT rc; GetClientRect(_hParent, &rc);
@@ -261,39 +267,67 @@ void ReaderPanel::OnPaint(HDC hdc)
     // ─── фон окна (чёрный) ─────────────────────────────────
     FillRect(mem, &cli, (HBRUSH)GetStockObject(BLACK_BRUSH));
 
-    // ─── верхняя иллюстрация (если есть) ──────────────────
-    // ─── верхняя иллюстрация ───────────────────────────────────────────
+    const int topMargin = 40;   // отступ от верхнего края окна
+    const int gap = 8;    // микро-зазор до _rcBox
+    RECT artRect{ topMargin, topMargin,
+        std::max(topMargin, cli.right - topMargin),
+        std::max(topMargin, _rcBox.top - gap) };
+
     if (_bgBitmap)
     {
-        const int topMargin = 40;   // отступ от верхнего края окна
-        const int gap = 8;    // микро-зазор до _rcBox
-
         HDC hTmp = CreateCompatibleDC(mem);
         HGDIOBJ o = SelectObject(hTmp, _bgBitmap);
 
         BITMAP bm; GetObject(_bgBitmap, sizeof(bm), &bm);
 
-        // 1. свободная «рамка» для картинки
-        int maxH = _rcBox.top - gap - topMargin;     // до края текстового окна
-        int maxW = cli.right - topMargin * 2;        // почти во всю ширину
+        int maxH = artRect.bottom - artRect.top;
+        int maxW = artRect.right - artRect.left;
+        if (maxH > 0 && maxW > 0)
+        {
+            float sW = float(maxW) / bm.bmWidth;
+            float sH = float(maxH) / bm.bmHeight;
+            float scale = min(sW, sH);
 
-        // 2. коэффициент масштабирования
-        float sW = float(maxW) / bm.bmWidth;
-        float sH = float(maxH) / bm.bmHeight;
-        float scale = min(sW, sH);                   // → не выйдем за пределы
+            int w = int(bm.bmWidth * scale);
+            int h = int(bm.bmHeight * scale);
+            int x = artRect.left + (maxW - w) / 2;
+            int y = artRect.top + (maxH - h) / 2;
 
-        // 3. финальные размеры и позиция
-        int w = int(bm.bmWidth * scale);
-        int h = int(bm.bmHeight * scale);
-        int x = (cli.right - w) / 2;
-        int y = topMargin;
-
-        SetStretchBltMode(mem, HALFTONE);            // сглаживаем
-        StretchBlt(mem, x, y, w, h,
-            hTmp, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+            SetStretchBltMode(mem, HALFTONE);
+            StretchBlt(mem, x, y, w, h,
+                hTmp, 0, 0, bm.bmWidth, bm.bmHeight, SRCCOPY);
+        }
 
         SelectObject(hTmp, o);
         DeleteDC(hTmp);
+    }
+    else if (artRect.bottom > artRect.top)
+    {
+        HBRUSH brScene = CreateSolidBrush(CLR_SCENE_BG);
+        FillRect(mem, &artRect, brScene);
+        DeleteObject(brScene);
+    }
+
+    if (!_sceneStatusText.empty() && artRect.bottom > artRect.top)
+    {
+        RECT rcMsg = artRect;
+        InflateRect(&rcMsg, -24, -16);
+        if (rcMsg.bottom < rcMsg.top) rcMsg.bottom = rcMsg.top;
+
+        std::wstring statusLine = _sceneStatusText;
+        if (_sceneStatusCode)
+            statusLine = L"HTTP " + std::to_wstring(_sceneStatusCode) + L": " + statusLine;
+        else if (_sceneWin32Error)
+            statusLine = L"Network error " + std::to_wstring(_sceneWin32Error) + L": " + statusLine;
+
+        HFONT oldFont = (HFONT)SelectObject(mem, _font);
+        COLORREF oldColor = SetTextColor(mem, CLR_SCENE_ERR);
+        int oldMode = SetBkMode(mem, TRANSPARENT);
+        DrawTextW(mem, statusLine.c_str(), static_cast<int>(statusLine.size()), &rcMsg,
+            DT_LEFT | DT_TOP | DT_WORDBREAK);
+        SetBkMode(mem, oldMode);
+        SetTextColor(mem, oldColor);
+        SelectObject(mem, oldFont);
     }
 
 
@@ -397,6 +431,9 @@ void ReaderPanel::OnTimer()
         // ───── обновляем текущий кадр ─────
         _frameStart = start;
         _endOfFrame = end;
+        _sceneStatusText.clear();
+        _sceneStatusCode = 0;
+        _sceneWin32Error = 0;
 
         if (_onFrameChange) {
             std::wstring frameText = _text.substr(_frameStart, _endOfFrame - _frameStart);
@@ -405,12 +442,25 @@ void ReaderPanel::OnTimer()
             auto sendSceneRequest = [this](const std::wstring& chunk) {
                 if (_requestedFrames.insert(chunk).second) {
                     fetchSceneAsync(chunk, [this, chunk](SceneApiResponse scene) {
-                            if (!scene.imageUrl.empty()) {
-                                PostMessage(_hParent, WM_USER + 1, 0, 0); // триггер загрузки
+                        scene.requestId = chunk;
+                        if (!scene.imageUrl.empty())
+                        {
+                            if (HBITMAP bmp = _imageCache.Get(scene.imageUrl))
+                            {
+                                PostMessage(_hParent, WM_USER + 1, reinterpret_cast<WPARAM>(bmp), 0);
                             }
-                        });
+                            return;
+                        }
+
+                        if (!scene.errorMessage.empty())
+                        {
+                            auto payload = new SceneApiResponse(std::move(scene));
+                            if (!PostMessage(_hParent, WM_USER + 2, reinterpret_cast<WPARAM>(payload), 0))
+                                delete payload;
+                        }
+                    });
                 }
-                };
+            };
 
             // отправка текущей сцены
             sendSceneRequest(frameText);
@@ -587,7 +637,20 @@ void ReaderPanel::destroyScrollbar()
 // 1) реализация нового метода
 void ReaderPanel::SetBackground(HBITMAP bmp)
 {
-    //if (!bmp) return;                        // 🔹 ничего — выходим
     _bgBitmap = bmp;
+    _sceneStatusText.clear();
+    _sceneStatusCode = 0;
+    _sceneWin32Error = 0;
+    InvalidateRect(_hParent, nullptr, FALSE);
+}
+
+void ReaderPanel::SetSceneError(const SceneApiResponse& scene)
+{
+    _bgBitmap = nullptr;
+    _sceneStatusText = scene.errorMessage;
+    _sceneStatusCode = scene.statusCode;
+    _sceneWin32Error = scene.win32Error;
+    if (!scene.requestId.empty())
+        _requestedFrames.erase(scene.requestId);
     InvalidateRect(_hParent, nullptr, FALSE);
 }
