@@ -44,14 +44,22 @@ namespace manuscripta {
         std::string raw = readBinary(filePath);
 
         // Try interpret as UTF‑8 first
-        int lenW = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, raw.data(), (int)raw.size(), nullptr, 0);
+        bool usedUtf8 = true;
+        int lenW = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+            raw.data(), static_cast<int>(raw.size()), nullptr, 0);
         if (lenW == 0) {
             // Fallback to system codepage
-            lenW = MultiByteToWideChar(CP_ACP, 0, raw.data(), (int)raw.size(), nullptr, 0);
+            usedUtf8 = false;
+            lenW = MultiByteToWideChar(CP_ACP, 0,
+                raw.data(), static_cast<int>(raw.size()), nullptr, 0);
             if (lenW == 0) throw std::runtime_error("Encoding conversion failed");
         }
+
         std::wstring w(lenW, L'\0');
-        MultiByteToWideChar(lenW == 0 ? CP_ACP : CP_UTF8, 0, raw.data(), (int)raw.size(), w.data(), lenW);
+        UINT codePage = usedUtf8 ? CP_UTF8 : CP_ACP;
+        DWORD flags = usedUtf8 ? MB_ERR_INVALID_CHARS : 0;
+        MultiByteToWideChar(codePage, flags,
+            raw.data(), static_cast<int>(raw.size()), w.data(), lenW);
         return w;
     }
 

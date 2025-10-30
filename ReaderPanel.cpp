@@ -404,13 +404,17 @@ void ReaderPanel::OnTimer()
             // ─── [NEW] Кэшируем и запрашиваем 2 сцены ───────────────
             auto sendSceneRequest = [this](const std::wstring& chunk) {
                 if (_requestedFrames.insert(chunk).second) {
-                    fetchSceneAsync(chunk, [this, chunk](SceneApiResponse scene) {
-                            if (!scene.imageUrl.empty()) {
-                                PostMessage(_hParent, WM_USER + 1, 0, 0); // триггер загрузки
-                            }
-                        });
+                    fetchSceneAsync(chunk, [this](SceneApiResponse scene) {
+                        if (scene.imageUrl.empty())
+                            return;
+
+                        if (HBITMAP bmp = _imageCache.Get(scene.imageUrl))
+                        {
+                            PostMessage(_hParent, WM_USER + 1, reinterpret_cast<WPARAM>(bmp), 0);
+                        }
+                    });
                 }
-                };
+            };
 
             // отправка текущей сцены
             sendSceneRequest(frameText);

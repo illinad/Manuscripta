@@ -3,6 +3,7 @@
 #include <string>
 #include <functional>
 #include <unordered_set>
+#include "ImageCache.h"
 
 // ────────────────────────────────────────────────────────────────
 //  Вертикальная читалка с собственным скроллбаром и «эффектом
@@ -91,4 +92,5 @@ private:
     std::unordered_set<std::wstring> _requestedFrames;
 
     HBITMAP _bgBitmap = nullptr;
+    ImageCache _imageCache;
 };
