@@ -174,6 +174,7 @@ void ReaderPanel::SetText(const std::wstring& txt)
     _frameStart = 0;
     _cursorPos = 0;
     _frameIdle = false;      // ← лишнее обнуление _visible убрано
+    _endOfFrame = findNextParagraph(0, SKIP_ENDS);   // граница первого кадра, иначе автопауза срабатывает сразу
 
 
     RECT rc; GetClientRect(_hParent, &rc);
@@ -398,7 +399,6 @@ void ReaderPanel::OnTimer()
         _frameStart = start;
         _endOfFrame = end;
 
-#if !TEXT_ONLY_MODE
         if (_onFrameChange) {
             std::wstring frameText = _text.substr(_frameStart, _endOfFrame - _frameStart);
             _onFrameChange(frameText);
@@ -430,7 +430,6 @@ void ReaderPanel::OnTimer()
                 sendSceneRequest(nextFrame);
             }
         }
-#endif
 
         // ───── ничего не печатаем, если пусто ─────
         if (_frameStart == _endOfFrame) {
