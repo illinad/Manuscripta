@@ -127,7 +127,7 @@
   <ItemGroup>
     <ClInclude Include="config.h" />
     <ClInclude Include="FileLoader.h" />
-    <ClInclude Include="ImageCache.h" />
+    <ClInclude Include="ImageLoader.h" />
     <ClInclude Include="logger.hpp" />
     <ClInclude Include="MenuWindow.h" />
     <ClInclude Include="nlohmann_json.hpp" />
@@ -138,7 +138,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FileLoader.cpp" />
-    <ClCompile Include="ImageCache.cpp" />
+    <ClCompile Include="ImageLoader.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="MenuWindow.cpp" />
     <ClCompile Include="ReaderPanel.cpp" />

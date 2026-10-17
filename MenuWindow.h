@@ -4,7 +4,6 @@
 #include <memory>          // std::unique_ptr
 #include "ReaderPanel.h"
 #include <string>
-#include "ImageCache.h"
 
 class MenuWindow
 {
@@ -16,11 +15,7 @@ public:
 
 private:
     bool _frameCbRegistered{ false };
-    bool _forceSpinner = false;
-    bool _showSpinner = false;
-    int  _spinnerAngle = 0;
     // Internal helpers
-    ImageCache _imgCache;
     void RegisterClass();
     void CreateMainWindow(int nCmdShow);
 
@@ -47,10 +42,14 @@ private:
     HFONT     _fontBtn{};
 
     std::unique_ptr<ReaderPanel> _reader;
+    HBITMAP   _background{};      // текущая иллюстрация, владеем ею
+    unsigned  _generation = 0;    // номер открытой книги: картинки от прошлых отбрасываются
 
     // helpers
     void paintMenu(HDC hdc);
     HWND createButton(UINT id, int y, LPCWSTR text);
     LPCWSTR modeLabel() const;
     void showMenuButtons(bool show);
+    void requestScene(const std::wstring& chunk);
+    void releaseBook();
 };

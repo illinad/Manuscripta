@@ -2,8 +2,6 @@
 #include <algorithm>
 #include "config.h"
 #include <unordered_set>
-#include "SceneFetcher.h"
-#include "ImageCache.h"
 
 const int ReaderPanel::SCROLL_W = GetSystemMetrics(SM_CXVSCROLL);
 
@@ -402,23 +400,6 @@ void ReaderPanel::OnTimer()
         if (_onFrameChange) {
             std::wstring frameText = _text.substr(_frameStart, _endOfFrame - _frameStart);
             _onFrameChange(frameText);
-            // ─── [NEW] Кэшируем и запрашиваем 2 сцены ───────────────
-            auto sendSceneRequest = [this](const std::wstring& chunk) {
-                if (_requestedFrames.insert(chunk).second) {
-                    fetchSceneAsync(chunk, [this](SceneApiResponse scene) {
-                        if (scene.imageUrl.empty())
-                            return;
-
-                        if (HBITMAP bmp = _imageCache.Get(scene.imageUrl))
-                        {
-                            PostMessage(_hParent, WM_USER + 1, reinterpret_cast<WPARAM>(bmp), 0);
-                        }
-                    });
-                }
-            };
-
-            // отправка текущей сцены
-            sendSceneRequest(frameText);
 
             // попытка запроса следующей сцены (на +SKIP_ENDS)
             size_t nextStart = findNextParagraph(_endOfFrame, 0);
@@ -427,7 +408,7 @@ void ReaderPanel::OnTimer()
 
             if (nextStart < nextEnd) {
                 std::wstring nextFrame = _text.substr(nextStart, nextEnd - nextStart);
-                sendSceneRequest(nextFrame);
+                _onFrameChange(nextFrame);
             }
         }
 

@@ -9,10 +9,10 @@
 #include "MenuWindow.h"
 #include "FileLoader.h"     // selectTxtFile / loadTextFileW
 #include "Resource.h"       // ID кнопок
-#include "ImageCache.h"
+#include "ImageLoader.h"
 #include "SceneFetcher.h"
 #include "config.h"
-#include <cmath>
+#include <exception>
 
 // ───── локальные константы оформления меню ─────
 namespace {
@@ -78,7 +78,6 @@ void MenuWindow::paintMenu(HDC hdc)
     SetBkMode(hdc, TRANSPARENT);
 
     // ─── логотип показываем ТОЛЬКО когда не в режиме загрузки ───
-    //if (!_forceSpinner)                 // <-- добавлено условие
     {
         SelectObject(hdc, _fontTitle);
         SetTextColor(hdc, CLR_TXT);
@@ -90,27 +89,6 @@ void MenuWindow::paintMenu(HDC hdc)
         RECT rSub{ 0, 300, WIN_W, 360 };
         DrawTextW(hdc, L"Read. Reshape. Resonate.", -1, &rSub,
             DT_CENTER | DT_TOP);
-    }
-
-    // ─── спиннер ───
-    if (_showSpinner)
-    {
-        const int cx = WIN_W / 8;
-        const int cy = (WIN_H / 4) * 3;
-        const int r = 32;
-
-        for (int i = 0; i < 12; ++i)
-        {
-            float angle = (_spinnerAngle + i * 30) * 3.14159f / 180.0f;
-            int   x = int(cx + r * cos(angle));
-            int   y = int(cy + r * sin(angle));
-            int   alpha = 255 - i * (255 / 12);
-
-            HBRUSH br = CreateSolidBrush(RGB(alpha, alpha, alpha));
-            RECT dot = { x - 3, y - 3, x + 3, y + 3 };
-            FillRect(hdc, &dot, br);
-            DeleteObject(br);
-        }
     }
 }
 
@@ -154,34 +132,46 @@ MenuWindow::~MenuWindow()
     DeleteObject(_fontTitle);
     DeleteObject(_fontSub);
     DeleteObject(_fontBtn);
+    releaseBook();
 }
 
 
 // helper ------------------------------------------------------------------
 namespace
 {
-    constexpr UINT WM_SET_BG = WM_USER + 1;    // передаём HBITMAP в ReaderPanel
-    constexpr UINT IDT_SPINNER = 2;            // таймер для крутилки
+    constexpr UINT WM_SET_BG = WM_USER + 1;    // фоновый поток → окно: HBITMAP + номер книги
+}
 
-    //-----------------------------------------------------------------------
-    // утилита: отправить сцену на асинхр. загрузку (если ещё не запрошена)
-    //-----------------------------------------------------------------------
-    void enqueueScene(ReaderPanel* reader,
-        ImageCache& cache,
-        HWND hwnd,
-        const std::wstring& chunk)
-    {
-        if (!reader || !reader->TryMarkFrameRequested(chunk))   // уже была
-            return;
+//--------------------------------------------------------------------------
+// Запросить иллюстрацию для сцены (если ещё не запрашивали).
+// Фоновый поток не трогает ни MenuWindow, ни ReaderPanel: только сеть,
+// декодирование и PostMessage. Устаревшие картинки отсекаются по _generation.
+//--------------------------------------------------------------------------
+void MenuWindow::requestScene(const std::wstring& chunk)
+{
+    if (chunk.empty() || !_reader || !_reader->TryMarkFrameRequested(chunk))
+        return;
 
-        fetchSceneAsync(chunk, [reader, &cache, hwnd](SceneApiResponse r)
-            {
-                if (r.imageUrl.empty())
-                    return;
-                if (HBITMAP bmp = cache.Get(r.imageUrl))
-                    PostMessage(hwnd, WM_SET_BG, reinterpret_cast<WPARAM>(bmp), 0);
-            });
-    }
+    HWND hwnd = _hWnd;
+    unsigned gen = _generation;
+    fetchSceneAsync(chunk, [hwnd, gen](SceneApiResponse scene)
+        {
+            if (scene.imageUrl.empty())
+                return;
+            HBITMAP bmp = downloadBitmap(scene.imageUrl);
+            if (bmp && !PostMessage(hwnd, WM_SET_BG, reinterpret_cast<WPARAM>(bmp), gen))
+                DeleteObject(bmp);
+        });
+}
+
+//--------------------------------------------------------------------------
+// Закрыть текущую книгу: читалка, её иллюстрация и все запросы в полёте
+//--------------------------------------------------------------------------
+void MenuWindow::releaseBook()
+{
+    ++_generation;
+    _reader.reset();
+    if (_background) { DeleteObject(_background); _background = nullptr; }
 }
 
 //--------------------------------------------------------------------------
@@ -198,97 +188,46 @@ void MenuWindow::OnCommand(UINT id)
         std::wstring path = selectTxtFile(_hWnd);
         if (path.empty()) break;
 
-        // 2. Ensure reader exists ------------------------------------------
-        if (!_reader)
-            _reader = std::make_unique<ReaderPanel>(_hInst, _hWnd);
+        // 2. Read it first: a file that can't be read must not crash the app
+        std::wstring text;
+        try
+        {
+            text = manuscripta::loadTextFileW(path);
+        }
+        catch (const std::exception&)
+        {
+            MessageBoxW(_hWnd, L"Could not read the selected file.",
+                L"MANUSCRIPTA", MB_OK | MB_ICONERROR);
+            break;
+        }
 
-        std::wstring text = manuscripta::loadTextFileW(path);
+        // 3. Fresh reader for every book -----------------------------------
+        releaseBook();
+        _reader = std::make_unique<ReaderPanel>(_hInst, _hWnd);
 
         if (_textOnly)
         {
-            // текстовый режим: без запросов сцен и без спиннера
-            _reader->SetOnFrameChange(nullptr);
+            // текстовый режим: без запросов сцен
             _reader->SetText(text);
         }
         else
         {
-            // 3. Show spinner *before* blocking network / disk work -------------
-            _forceSpinner = true;   // Hide logo, block ReaderPanel paint
-            _showSpinner = true;
-            SetTimer(_hWnd, IDT_SPINNER, 100, nullptr);
-            InvalidateRect(_hWnd, nullptr, FALSE);
-            UpdateWindow(_hWnd);    // Immediate repaint so spinner is visible
-
-            // Give the spinner at least one WM_PAINT / WM_TIMER  tick
-            MSG m;
-            while (PeekMessage(&m, nullptr, 0, 0, PM_REMOVE))
-            {
-                TranslateMessage(&m);
-                DispatchMessage(&m);
-            }
-
-            // 4. Register frame‑change callback --------------------------------
+            // 4. Scenes the reader asks for (current + prefetch) ------------
             _reader->SetOnFrameChange([this](const std::wstring& frame)
                 {
-                    if (_reader->TryMarkFrameRequested(frame))
-                    {
-                        fetchSceneAsync(frame, [this](SceneApiResponse scene)
-                            {
-                                if (!scene.imageUrl.empty())
-                                {
-                                    if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                        PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                                }
-                            });
-                    }
+                    requestScene(frame);
                 });
 
-            // 5. Feed the text (first frame will trigger the callback itself) ---
             _reader->SetText(text);
 
-            // 6. Pre‑calculate first two chunks for scene fetching --------------
-            std::wstring scene1 = _reader->GetFrameText(0, SKIP_ENDS);
+            // 5. The first frame starts already visible, so request it and
+            //    the next one here. Everything is async: the UI never waits.
             size_t nextStart = _reader->findNextParagraph(0, SKIP_ENDS);
-            std::wstring scene2 = _reader->GetFrameText(nextStart, SKIP_ENDS);
-
-            auto tryRequest = [this](const std::wstring& chunk)
-                {
-                    if (_reader->TryMarkFrameRequested(chunk))
-                    {
-                        fetchSceneAsync(chunk, [this](SceneApiResponse scene)
-                            {
-                                if (!scene.imageUrl.empty())
-                                {
-                                    if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                        PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                                }
-                            });
-                    }
-                };
-
-            // 7. Synchronous fetch for the very first scene ---------------------
-            if (_reader->TryMarkFrameRequested(scene1))
-            {
-                SceneApiResponse first = fetchScene(scene1);
-                if (!first.imageUrl.empty())
-                {
-                    if (HBITMAP bmp = _imgCache.Get(first.imageUrl))
-                        _reader->SetBackground(bmp);
-                }
-            }
-
-            // 8. Kick off asynchronous fetches for scene1 / scene2 -------------
-            tryRequest(scene1);
-            tryRequest(scene2);
-
-            // 9. Hide spinner & reveal reader panel ----------------------------
-            KillTimer(_hWnd, IDT_SPINNER);
-            _forceSpinner = false;
-            _showSpinner = false;
-            InvalidateRect(_hWnd, nullptr, FALSE);
+            requestScene(_reader->GetFrameText(0, SKIP_ENDS));
+            requestScene(_reader->GetFrameText(nextStart, SKIP_ENDS));
         }
 
-        // 10. Hide menu buttons ---------------------------------------------
+        // 6. Hide menu buttons ----------------------------------------------
         showMenuButtons(false);
         break;
     }
@@ -353,7 +292,7 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
     case WM_PAINT:
     {
         PAINTSTRUCT ps; HDC hdc = BeginPaint(hWnd, &ps);
-        if (self->_reader && self->_reader->IsActive() && !self->_forceSpinner)
+        if (self->_reader && self->_reader->IsActive())
             self->_reader->OnPaint(hdc);
         else
             self->paintMenu(hdc);
@@ -365,12 +304,6 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
         if (self->_reader && self->_reader->IsActive())
             self->_reader->OnTimer();
 
-        if (self->_showSpinner)
-        {
-            self->_spinnerAngle = (self->_spinnerAngle + 15) % 360;
-            InvalidateRect(self->_hWnd, nullptr, FALSE);
-            return 0;
-        }
         break;
 
     case WM_MOUSEWHEEL:
@@ -392,27 +325,24 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
             // панель закрылась → возвращаем меню
             if (!self->_reader->IsActive())
             {
-                self->_reader.reset();
+                self->releaseBook();
                 self->showMenuButtons(true);
             }
             return 0;
         }
         break;
 
-    case WM_USER + 1: // пришла картинка
+    case WM_SET_BG: // пришла картинка: HBITMAP теперь наш
     {
-        HBITMAP bmp = (HBITMAP)wParam;
-        if (self->_reader)
+        HBITMAP bmp = reinterpret_cast<HBITMAP>(wParam);
+        if (static_cast<unsigned>(lParam) != self->_generation || !self->_reader)
         {
-            self->_reader->SetBackground(bmp);
-
-            // выключаем спиннер, включаем рендер ReaderPanel
-            self->_forceSpinner = false;
-            self->_showSpinner = false;
-            KillTimer(self->_hWnd, IDT_SPINNER);
-
-            InvalidateRect(self->_hWnd, nullptr, FALSE);
+            DeleteObject(bmp);           // от уже закрытой книги
+            return 0;
         }
+        self->_reader->SetBackground(bmp);
+        if (self->_background) DeleteObject(self->_background);
+        self->_background = bmp;
         return 0;
     }
 

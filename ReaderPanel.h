@@ -3,7 +3,6 @@
 #include <string>
 #include <functional>
 #include <unordered_set>
-#include "ImageCache.h"
 
 // ────────────────────────────────────────────────────────────────
 //  Вертикальная читалка с собственным скроллбаром и «эффектом
@@ -31,6 +30,8 @@ public:
     void updateScrollInfo();
     std::wstring GetFirstFrame() const;
     void SetBackground(HBITMAP bmp);
+    // Колбэк получает текст каждой сцены, для которой нужна иллюстрация:
+    // текущего кадра и следующего (предзагрузка).
     void SetOnFrameChange(std::function<void(const std::wstring&)> cb);
 
     std::wstring GetFrameText(size_t start, int count) const;
@@ -91,6 +92,5 @@ private:
 
     std::unordered_set<std::wstring> _requestedFrames;
 
-    HBITMAP _bgBitmap = nullptr;
-    ImageCache _imageCache;
+    HBITMAP _bgBitmap = nullptr;   // не владеем: картинкой управляет MenuWindow
 };

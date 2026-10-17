@@ -3,10 +3,12 @@
 
 #include <windows.h>
 #include "MenuWindow.h"
+#include "ImageLoader.h"
 
 int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int nCmdShow)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    GdiplusSession gdiplus;     // GDI+ for the whole app lifetime
     MenuWindow menu(hInst);
     return menu.Run(nCmdShow);
 }
