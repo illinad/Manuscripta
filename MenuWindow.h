@@ -38,6 +38,9 @@ private:
     HWND      _hWnd{};
     HWND      _btnOpen{};
     HWND      _btnExit{};
+    HWND      _btnMode{};
+
+    bool      _textOnly = true;   // режим чтения: только текст / с иллюстрациями
 
     HFONT     _fontTitle{};
     HFONT     _fontSub{};
@@ -48,4 +51,6 @@ private:
     // helpers
     void paintMenu(HDC hdc);
     HWND createButton(UINT id, int y, LPCWSTR text);
+    LPCWSTR modeLabel() const;
+    void showMenuButtons(bool show);
 };

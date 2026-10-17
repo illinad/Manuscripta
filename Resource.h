@@ -14,6 +14,7 @@
 #define IDC_MANUSCRIPTA			109
 #define ID_BTN_OPEN 1001
 #define ID_BTN_EXIT 1002
+#define ID_BTN_MODE 1003
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1

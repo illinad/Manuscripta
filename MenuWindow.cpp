@@ -21,7 +21,8 @@ namespace {
     constexpr int  BTN_W = 400;
     constexpr int  BTN_H = 80;
     constexpr int  BTN_Y1 = 400;        // Open existing
-    constexpr int  BTN_Y2 = 500;        // Exit
+    constexpr int  BTN_Y2 = 500;        // Mode
+    constexpr int  BTN_Y3 = 600;        // Exit
 
     constexpr COLORREF CLR_BG = RGB(13, 13, 15);
     constexpr COLORREF CLR_ACC = RGB(0, 195, 198);
@@ -52,6 +53,19 @@ HWND MenuWindow::createButton(UINT id, int y, LPCWSTR text)
         WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         (WIN_W - BTN_W) / 2, y, BTN_W, BTN_H,
         _hWnd, (HMENU)id, _hInst, nullptr);
+}
+
+LPCWSTR MenuWindow::modeLabel() const
+{
+    return _textOnly ? L"Mode: Text only" : L"Mode: Illustrated";
+}
+
+void MenuWindow::showMenuButtons(bool show)
+{
+    const int cmd = show ? SW_SHOW : SW_HIDE;
+    ShowWindow(_btnOpen, cmd);
+    ShowWindow(_btnMode, cmd);
+    ShowWindow(_btnExit, cmd);
 }
 
 void MenuWindow::paintMenu(HDC hdc)
@@ -128,7 +142,8 @@ MenuWindow::MenuWindow(HINSTANCE hInst) : _hInst(hInst)
 
     // 4) кнопки
     _btnOpen = createButton(ID_BTN_OPEN, BTN_Y1, L"Open existing");
-    _btnExit = createButton(ID_BTN_EXIT, BTN_Y2, L"Exit");
+    _btnMode = createButton(ID_BTN_MODE, BTN_Y2, modeLabel());
+    _btnExit = createButton(ID_BTN_EXIT, BTN_Y3, L"Exit");
 
     ShowWindow(_hWnd, SW_SHOW);
     UpdateWindow(_hWnd);
@@ -189,91 +204,101 @@ void MenuWindow::OnCommand(UINT id)
 
         std::wstring text = manuscripta::loadTextFileW(path);
 
-#if TEXT_ONLY_MODE
-        _reader->SetText(text);
-#else
-        // 3. Show spinner *before* blocking network / disk work -------------
-        _forceSpinner = true;   // Hide logo, block ReaderPanel paint
-        _showSpinner = true;
-        SetTimer(_hWnd, IDT_SPINNER, 100, nullptr);
-        InvalidateRect(_hWnd, nullptr, FALSE);
-        UpdateWindow(_hWnd);    // Immediate repaint so spinner is visible
-
-        // Give the spinner at least one WM_PAINT / WM_TIMER  tick
-        MSG m;
-        while (PeekMessage(&m, nullptr, 0, 0, PM_REMOVE))
+        if (_textOnly)
         {
-            TranslateMessage(&m);
-            DispatchMessage(&m);
+            // текстовый режим: без запросов сцен и без спиннера
+            _reader->SetOnFrameChange(nullptr);
+            _reader->SetText(text);
         }
-
-        // 4. Register frame‑change callback --------------------------------
-        _reader->SetOnFrameChange([this](const std::wstring& frame)
-            {
-                if (_reader->TryMarkFrameRequested(frame))
-                {
-                    fetchSceneAsync(frame, [this](SceneApiResponse scene)
-                        {
-                            if (!scene.imageUrl.empty())
-                            {
-                                if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                    PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                            }
-                        });
-                }
-            });
-
-        // 5. Feed the text (first frame will trigger the callback itself) ---
-        _reader->SetText(text);
-
-        // 6. Pre‑calculate first two chunks for scene fetching --------------
-        std::wstring scene1 = _reader->GetFrameText(0, SKIP_ENDS);
-        size_t nextStart = _reader->findNextParagraph(0, SKIP_ENDS);
-        std::wstring scene2 = _reader->GetFrameText(nextStart, SKIP_ENDS);
-
-        auto tryRequest = [this](const std::wstring& chunk)
-            {
-                if (_reader->TryMarkFrameRequested(chunk))
-                {
-                    fetchSceneAsync(chunk, [this](SceneApiResponse scene)
-                        {
-                            if (!scene.imageUrl.empty())
-                            {
-                                if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
-                                    PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
-                            }
-                        });
-                }
-            };
-
-        // 7. Synchronous fetch for the very first scene ---------------------
-        if (_reader->TryMarkFrameRequested(scene1))
+        else
         {
-            SceneApiResponse first = fetchScene(scene1);
-            if (!first.imageUrl.empty())
+            // 3. Show spinner *before* blocking network / disk work -------------
+            _forceSpinner = true;   // Hide logo, block ReaderPanel paint
+            _showSpinner = true;
+            SetTimer(_hWnd, IDT_SPINNER, 100, nullptr);
+            InvalidateRect(_hWnd, nullptr, FALSE);
+            UpdateWindow(_hWnd);    // Immediate repaint so spinner is visible
+
+            // Give the spinner at least one WM_PAINT / WM_TIMER  tick
+            MSG m;
+            while (PeekMessage(&m, nullptr, 0, 0, PM_REMOVE))
             {
-                if (HBITMAP bmp = _imgCache.Get(first.imageUrl))
-                    _reader->SetBackground(bmp);
+                TranslateMessage(&m);
+                DispatchMessage(&m);
             }
+
+            // 4. Register frame‑change callback --------------------------------
+            _reader->SetOnFrameChange([this](const std::wstring& frame)
+                {
+                    if (_reader->TryMarkFrameRequested(frame))
+                    {
+                        fetchSceneAsync(frame, [this](SceneApiResponse scene)
+                            {
+                                if (!scene.imageUrl.empty())
+                                {
+                                    if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
+                                        PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
+                                }
+                            });
+                    }
+                });
+
+            // 5. Feed the text (first frame will trigger the callback itself) ---
+            _reader->SetText(text);
+
+            // 6. Pre‑calculate first two chunks for scene fetching --------------
+            std::wstring scene1 = _reader->GetFrameText(0, SKIP_ENDS);
+            size_t nextStart = _reader->findNextParagraph(0, SKIP_ENDS);
+            std::wstring scene2 = _reader->GetFrameText(nextStart, SKIP_ENDS);
+
+            auto tryRequest = [this](const std::wstring& chunk)
+                {
+                    if (_reader->TryMarkFrameRequested(chunk))
+                    {
+                        fetchSceneAsync(chunk, [this](SceneApiResponse scene)
+                            {
+                                if (!scene.imageUrl.empty())
+                                {
+                                    if (HBITMAP bmp = _imgCache.Get(scene.imageUrl))
+                                        PostMessage(_hWnd, WM_USER + 1, (WPARAM)bmp, 0);
+                                }
+                            });
+                    }
+                };
+
+            // 7. Synchronous fetch for the very first scene ---------------------
+            if (_reader->TryMarkFrameRequested(scene1))
+            {
+                SceneApiResponse first = fetchScene(scene1);
+                if (!first.imageUrl.empty())
+                {
+                    if (HBITMAP bmp = _imgCache.Get(first.imageUrl))
+                        _reader->SetBackground(bmp);
+                }
+            }
+
+            // 8. Kick off asynchronous fetches for scene1 / scene2 -------------
+            tryRequest(scene1);
+            tryRequest(scene2);
+
+            // 9. Hide spinner & reveal reader panel ----------------------------
+            KillTimer(_hWnd, IDT_SPINNER);
+            _forceSpinner = false;
+            _showSpinner = false;
+            InvalidateRect(_hWnd, nullptr, FALSE);
         }
-
-        // 8. Kick off asynchronous fetches for scene1 / scene2 -------------
-        tryRequest(scene1);
-        tryRequest(scene2);
-
-        // 9. Hide spinner & reveal reader panel ----------------------------
-        KillTimer(_hWnd, IDT_SPINNER);
-        _forceSpinner = false;
-        _showSpinner = false;
-        InvalidateRect(_hWnd, nullptr, FALSE);
-
-#endif
 
         // 10. Hide menu buttons ---------------------------------------------
-        ShowWindow(_btnOpen, SW_HIDE);
-        ShowWindow(_btnExit, SW_HIDE);
+        showMenuButtons(false);
         break;
     }
+
+    // ──────────────────────────────────────────────────────────────────
+    case ID_BTN_MODE:
+        _textOnly = !_textOnly;
+        SetWindowTextW(_btnMode, modeLabel());
+        InvalidateRect(_btnMode, nullptr, TRUE);
+        break;
 
     // ──────────────────────────────────────────────────────────────────
     case ID_BTN_EXIT:
@@ -305,13 +330,15 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
     case WM_DRAWITEM:
     {
         auto dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
-        if (dis->CtlID == ID_BTN_OPEN || dis->CtlID == ID_BTN_EXIT)
+        if (dis->CtlID == ID_BTN_OPEN || dis->CtlID == ID_BTN_MODE || dis->CtlID == ID_BTN_EXIT)
         {
             FillRect(dis->hDC, &dis->rcItem, (HBRUSH)GetStockObject(LTGRAY_BRUSH));
             SetBkMode(dis->hDC, TRANSPARENT);
             SelectObject(dis->hDC, self->_fontBtn);
             SetTextColor(dis->hDC, RGB(13, 13, 15));
-            LPCWSTR txt = (dis->CtlID == ID_BTN_OPEN) ? L"Open existing" : L"Exit";
+            LPCWSTR txt = (dis->CtlID == ID_BTN_OPEN) ? L"Open existing"
+                        : (dis->CtlID == ID_BTN_MODE) ? self->modeLabel()
+                        : L"Exit";
             DrawTextW(dis->hDC, txt, -1, &dis->rcItem,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             return TRUE;
@@ -366,8 +393,7 @@ LRESULT CALLBACK MenuWindow::WndProc(HWND hWnd, UINT msg,
             if (!self->_reader->IsActive())
             {
                 self->_reader.reset();
-                ShowWindow(self->_btnOpen, SW_SHOW);
-                ShowWindow(self->_btnExit, SW_SHOW);
+                self->showMenuButtons(true);
             }
             return 0;
         }
