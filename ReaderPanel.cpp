@@ -398,6 +398,7 @@ void ReaderPanel::OnTimer()
         _frameStart = start;
         _endOfFrame = end;
 
+#if !TEXT_ONLY_MODE
         if (_onFrameChange) {
             std::wstring frameText = _text.substr(_frameStart, _endOfFrame - _frameStart);
             _onFrameChange(frameText);
@@ -429,6 +430,7 @@ void ReaderPanel::OnTimer()
                 sendSceneRequest(nextFrame);
             }
         }
+#endif
 
         // ───── ничего не печатаем, если пусто ─────
         if (_frameStart == _endOfFrame) {

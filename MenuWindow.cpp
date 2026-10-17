@@ -189,6 +189,9 @@ void MenuWindow::OnCommand(UINT id)
 
         std::wstring text = manuscripta::loadTextFileW(path);
 
+#if TEXT_ONLY_MODE
+        _reader->SetText(text);
+#else
         // 3. Show spinner *before* blocking network / disk work -------------
         _forceSpinner = true;   // Hide logo, block ReaderPanel paint
         _showSpinner = true;
@@ -263,6 +266,8 @@ void MenuWindow::OnCommand(UINT id)
         _forceSpinner = false;
         _showSpinner = false;
         InvalidateRect(_hWnd, nullptr, FALSE);
+
+#endif
 
         // 10. Hide menu buttons ---------------------------------------------
         ShowWindow(_btnOpen, SW_HIDE);

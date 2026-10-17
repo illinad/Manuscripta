@@ -5,3 +5,6 @@
 #define _STYLE_MEME " меметичний "
 
 #define _USE_STYLES _STYLE_COMMIX
+
+// 1 — только текст: без запросов к серверу и без иллюстраций
+#define TEXT_ONLY_MODE 1
