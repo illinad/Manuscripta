@@ -2,8 +2,10 @@
 #pragma once
 #include <windows.h>
 #include <memory>          // std::unique_ptr
-#include "ReaderPanel.h"
+#include <map>
+#include <set>
 #include <string>
+#include "ReaderPanel.h"
 
 class MenuWindow
 {
@@ -14,15 +16,8 @@ public:
     int Run(int nCmdShow);
 
 private:
-    bool _frameCbRegistered{ false };
-    // Internal helpers
-    void RegisterClass();
-    void CreateMainWindow(int nCmdShow);
-
-    void OnPaint();
     void OnCommand(UINT id);
-    void OnTimer();
-    void OnClick(int x, int y);
+    void openBook();
 
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -41,15 +36,24 @@ private:
     HFONT     _fontSub{};
     HFONT     _fontBtn{};
 
+    // ───── открытая книга ─────
     std::unique_ptr<ReaderPanel> _reader;
-    HBITMAP   _background{};      // текущая иллюстрация, владеем ею
+    std::wstring _bookPath;
     unsigned  _generation = 0;    // номер открытой книги: картинки от прошлых отбрасываются
+    std::map<size_t, HBITMAP> _sceneImages;   // кадр → иллюстрация (только рядом с текущим)
+    std::set<size_t> _requestedScenes;        // кадры, для которых запрос уже отправлен
 
     // helpers
+    int  px(int logical) const;
     void paintMenu(HDC hdc);
-    HWND createButton(UINT id, int y, LPCWSTR text);
+    HWND createButton(UINT id, LPCWSTR text);
+    void layoutButtons();
     LPCWSTR modeLabel() const;
     void showMenuButtons(bool show);
-    void requestScene(const std::wstring& chunk);
+
+    void onFrameChange(size_t frame);
+    void requestScene(size_t frame);
+    void onSceneImage(unsigned generation, size_t frame, HBITMAP bmp);
+    void closeReaderIfDone();
     void releaseBook();
 };
