@@ -13,7 +13,13 @@ jobs:
       - uses: microsoft/setup-msbuild@v2
 
       - name: Build (Release x64)
-        run: msbuild Manuscripta.vcxproj /m /p:Configuration=Release /p:Platform=x64
+        run: msbuild Manuscripta.vcxproj /m /p:Configuration=Release /p:Platform=x64 "/flp:errorsonly;logfile=msbuild-errors.log"
+
+      # Compiler errors as annotations, so they are visible on the run page and via the API
+      - name: Report build errors
+        if: failure()
+        shell: pwsh
+        run: Get-Content msbuild-errors.log | Select-Object -Unique -First 20 | ForEach-Object { Write-Output "::error::$_" }
 
       - uses: actions/upload-artifact@v4
         with:

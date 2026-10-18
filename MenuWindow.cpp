@@ -136,8 +136,8 @@ MenuWindow::MenuWindow(HINSTANCE hInst) : _hInst(hInst)
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int workW = work.right - work.left, workH = work.bottom - work.top;
-    const int w = std::min(px(WIN_W), workW * 9 / 10);
-    const int h = std::min(px(WIN_H), workH * 9 / 10);
+    const int w = (std::min)(px(WIN_W), workW * 9 / 10);
+    const int h = (std::min)(px(WIN_H), workH * 9 / 10);
 
     _hWnd = CreateWindowW(L"ManuscriptaMain", L"MANUSCRIPTA",
         WS_OVERLAPPEDWINDOW,
