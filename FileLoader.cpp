@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <stdexcept>
 #include <fstream>
+#include <filesystem>
+#include <initializer_list>
 #include <sstream>
 #include <windows.h>
 #include <commdlg.h>
@@ -29,11 +31,31 @@ namespace manuscripta {
 
 
     static std::string readBinary(const std::wstring& path) {
-        std::ifstream fs(path, std::ios::binary);
+        std::ifstream fs(std::filesystem::path(path), std::ios::binary);
         if (!fs) throw std::runtime_error("Cannot open file");
         std::ostringstream oss;
         oss << fs.rdbuf();
         return oss.str();
+    }
+
+    static std::wstring decode(const char* data, int size, UINT codePage, DWORD flags) {
+        if (size <= 0) return {};
+        int lenW = MultiByteToWideChar(codePage, flags, data, size, nullptr, 0);
+        if (lenW == 0) return {};
+        std::wstring w(lenW, L'\0');
+        MultiByteToWideChar(codePage, flags, data, size, w.data(), lenW);
+        return w;
+    }
+
+    static std::wstring decodeUtf16(const std::string& raw, size_t offset, bool bigEndian) {
+        std::wstring w;
+        w.reserve((raw.size() - offset) / 2);
+        for (size_t i = offset; i + 1 < raw.size(); i += 2) {
+            unsigned char lo = static_cast<unsigned char>(raw[bigEndian ? i + 1 : i]);
+            unsigned char hi = static_cast<unsigned char>(raw[bigEndian ? i : i + 1]);
+            w.push_back(static_cast<wchar_t>(lo | (hi << 8)));
+        }
+        return w;
     }
 
     std::string loadTextFileA(const std::wstring& filePath) {
@@ -42,24 +64,31 @@ namespace manuscripta {
 
     std::wstring loadTextFileW(const std::wstring& filePath) {
         std::string raw = readBinary(filePath);
+        if (raw.empty()) return {};
 
-        // Try interpret as UTF‑8 first
-        bool usedUtf8 = true;
-        int lenW = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
-            raw.data(), static_cast<int>(raw.size()), nullptr, 0);
-        if (lenW == 0) {
-            // Fallback to system codepage
-            usedUtf8 = false;
-            lenW = MultiByteToWideChar(CP_ACP, 0,
-                raw.data(), static_cast<int>(raw.size()), nullptr, 0);
-            if (lenW == 0) throw std::runtime_error("Encoding conversion failed");
-        }
+        auto starts = [&raw](std::initializer_list<unsigned char> bom) {
+            if (raw.size() < bom.size()) return false;
+            size_t i = 0;
+            for (unsigned char b : bom)
+                if (static_cast<unsigned char>(raw[i++]) != b) return false;
+            return true;
+        };
 
-        std::wstring w(lenW, L'\0');
-        UINT codePage = usedUtf8 ? CP_UTF8 : CP_ACP;
-        DWORD flags = usedUtf8 ? MB_ERR_INVALID_CHARS : 0;
-        MultiByteToWideChar(codePage, flags,
-            raw.data(), static_cast<int>(raw.size()), w.data(), lenW);
+        // BOM: UTF-8 / UTF-16 LE / UTF-16 BE
+        if (starts({ 0xEF, 0xBB, 0xBF }))
+            return decode(raw.data() + 3, static_cast<int>(raw.size() - 3), CP_UTF8, 0);
+        if (starts({ 0xFF, 0xFE }))
+            return decodeUtf16(raw, 2, false);
+        if (starts({ 0xFE, 0xFF }))
+            return decodeUtf16(raw, 2, true);
+
+        // Without BOM: strict UTF-8 first, then the system code page
+        const int size = static_cast<int>(raw.size());
+        std::wstring w = decode(raw.data(), size, CP_UTF8, MB_ERR_INVALID_CHARS);
+        if (w.empty())
+            w = decode(raw.data(), size, CP_ACP, 0);
+        if (w.empty())
+            throw std::runtime_error("Encoding conversion failed");
         return w;
     }
 

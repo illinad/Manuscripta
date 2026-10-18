@@ -13,8 +13,9 @@ namespace manuscripta {
 	// If you need wide char, use loadTextFileW below.
 	std::string loadTextFileA(const std::wstring& filePath);
 
-	// Reads a UTF‑16LE text file into std::wstring. If file is UTF‑8/ANSI it will
-	// be converted using MultiByteToWideChar with CP_UTF8 / CP_ACP fallback.
+	// Reads a text file into std::wstring. Understands UTF-8 / UTF-16 LE / UTF-16 BE
+	// with a BOM; without one tries strict UTF-8, then the system code page.
+	// An empty file gives an empty string.
 	std::wstring loadTextFileW(const std::wstring& filePath);
 
 } // namespace manuscripta
