@@ -1,4 +1,4 @@
-// Main.cpp � entry point for MANUSCRIPTA
+﻿// Main.cpp — entry point for MANUSCRIPTA
 // cl /EHsc /DUNICODE /D_UNICODE Main.cpp MenuWindow.cpp user32.lib gdi32.lib comctl32.lib
 
 #include <windows.h>

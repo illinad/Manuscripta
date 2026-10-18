@@ -1,4 +1,4 @@
-#pragma once
+п»ї#pragma once
 #include <iostream>
 #include <fstream>
 #include <string_view>
@@ -13,14 +13,14 @@ class Logger
 public:
     enum class Level { Info, Warn, Error };
 
-    /// Инициализировать логгер (по желанию указать файл-приёмник).
+    /// РРЅРёС†РёР°Р»РёР·РёСЂРѕРІР°С‚СЊ Р»РѕРіРіРµСЂ (РїРѕ Р¶РµР»Р°РЅРёСЋ СѓРєР°Р·Р°С‚СЊ С„Р°Р№Р»-РїСЂРёС‘РјРЅРёРє).
     static void init(std::string_view fileName = {})
     {
         if (!fileName.empty())
             s_file.open(std::string(fileName), std::ios::app);
     }
 
-    /// Записать сообщение c автоматической меткой времени и уровнем.
+    /// Р—Р°РїРёСЃР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ c Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРѕР№ РјРµС‚РєРѕР№ РІСЂРµРјРµРЅРё Рё СѓСЂРѕРІРЅРµРј.
     static void log(Level lvl, std::string_view msg)
     {
         const auto stamp = timeStamp();
@@ -33,18 +33,18 @@ public:
         line << stamp << ' ' << tag << ' ' << msg << '\n';
         const std::string ready = line.str();
 
-        // ---- вывод на консоль ----
+        // ---- РІС‹РІРѕРґ РЅР° РєРѕРЅСЃРѕР»СЊ ----
         std::cout << ready;
         std::cout.flush();
 
-        // ---- вывод в файл ----
+        // ---- РІС‹РІРѕРґ РІ С„Р°Р№Р» ----
         if (s_file.is_open())
         {
             s_file << ready;
             s_file.flush();
         }
 
-        // ---- вывод в OutputDebugString (Visual Studio) ----
+        // ---- РІС‹РІРѕРґ РІ OutputDebugString (Visual Studio) ----
 #ifdef _WIN32
         ::OutputDebugStringA(ready.c_str());
 #endif
@@ -77,5 +77,5 @@ private:
     }
 };
 
-// статическое поле
+// СЃС‚Р°С‚РёС‡РµСЃРєРѕРµ РїРѕР»Рµ
 inline std::ofstream Logger::s_file;

@@ -1,7 +1,7 @@
-#pragma once
+п»ї#pragma once
 #define SKIP_ENDS 4
-#define _STYLE_COMMIX " комікс "
-#define _STYLE_CINEMA " кінематографічний "
-#define _STYLE_MEME " меметичний "
+#define _STYLE_COMMIX " РєРѕРјС–РєСЃ "
+#define _STYLE_CINEMA " РєС–РЅРµРјР°С‚РѕРіСЂР°С„С–С‡РЅРёР№ "
+#define _STYLE_MEME " РјРµРјРµС‚РёС‡РЅРёР№ "
 
 #define _USE_STYLES _STYLE_COMMIX
