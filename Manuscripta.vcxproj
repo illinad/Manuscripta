@@ -135,6 +135,7 @@
     <ClInclude Include="ReaderPanel.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="SceneFetcher.h" />
+    <ClInclude Include="Settings.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FileLoader.cpp" />
@@ -143,6 +144,7 @@
     <ClCompile Include="MenuWindow.cpp" />
     <ClCompile Include="ReaderPanel.cpp" />
     <ClCompile Include="SceneFetcher.cpp" />
+    <ClCompile Include="Settings.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
