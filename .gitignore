@@ -1,0 +1,19 @@
+# Visual Studio
+.vs/
+*.user
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+ipch/
+
+# Build output
+Debug/
+Release/
+x64/
+Win32/
+*.exe
+*.obj
+*.pdb
+*.ilk
